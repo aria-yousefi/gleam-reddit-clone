@@ -2,7 +2,6 @@
 
 // Requires: gleam_stdlib, gleam_otp
 
-import argv
 import gleam/dict
 import gleam/erlang/process
 import gleam/float
@@ -13,7 +12,6 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/set
-import gleam/string
 
 // ============================
 // Types & shared definitions
@@ -432,10 +430,6 @@ fn engine_handle(
   }
 }
 
-fn engine_terminate(_st: EngineState) -> Nil {
-  Nil
-}
-
 // (Helper API used by clients)
 // Ask the engine to register, expect a reply
 pub fn register_user(engine: process.Subject(EngineMsg)) -> UserId {
@@ -592,34 +586,38 @@ fn client_handle(
 ) -> actor.Next(ClientState, ClientMsg) {
   case msg {
     Start -> {
-      process.send(st.self, Tick)
+      // Start by going online
+      process.send(st.self, GoOnline)
       actor.continue(st)
     }
 
     Tick -> {
+      // Act while online
       let st2 = case st.connected {
-        True -> act_online(st)
+        True -> {
+          // Add delay to avoid overwhelming the engine
+          process.sleep(50)
+          act_online(st)
+        }
         False -> st
       }
 
-      let next = case st.connected {
-        True -> GoOffline
-        False -> GoOnline
-      }
-
-      process.send(st.self, next)
+      // Continue ticking to keep acting
+      process.send(st2.self, Tick)
       actor.continue(st2)
     }
 
     GoOnline -> {
       let st2 = ClientState(..st, connected: True)
-      process.send(st.self, Tick)
+      // Start acting
+      process.send(st2.self, Tick)
       actor.continue(st2)
     }
 
     GoOffline -> {
       let st2 = ClientState(..st, connected: False)
-      process.send(st.self, Tick)
+      // Go back online after a brief moment
+      process.send(st2.self, GoOnline)
       actor.continue(st2)
     }
 
@@ -632,10 +630,6 @@ fn client_handle(
       actor.continue(st)
     }
   }
-}
-
-fn client_terminate(_st: ClientState) -> Nil {
-  Nil
 }
 
 fn act_online(st: ClientState) -> ClientState {
@@ -754,15 +748,22 @@ pub fn sim_run(n_users: Int, n_subs: Int, seconds: Int) -> Nil {
   // run for duration
   sleep_ms(seconds * 1000)
 
+  // Give the engine time to finish processing pending messages
+  io.println("\nWaiting for engine to process remaining messages...")
+  sleep_ms(2000)
+
   // Collect and print stats
+  io.println("Collecting statistics...")
   let stats_subject = process.new_subject()
   process.send(eng, Snapshot(stats_subject))
-  case process.receive(stats_subject, 5000) {
+  case process.receive(stats_subject, 15_000) {
     Ok(stats) -> {
-      let _ = print_stats(stats, n_users, n_subs, seconds)
-      Nil
+      io.println("Stats received from engine")
+      print_stats(stats, n_users, n_subs, seconds)
     }
-    Error(_) -> Nil
+    Error(_) -> {
+      io.println("ERROR: Failed to receive stats from engine (timeout)")
+    }
   }
 }
 
