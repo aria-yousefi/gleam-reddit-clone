@@ -817,9 +817,9 @@ fn print_stats(
 
 pub fn main() {
   io.println("Starting Reddit Simulator...")
-  let n_users = 50
+  let n_users = 100
   let n_subs = 10
-  let seconds = 5
+  let seconds = 10
 
   sim_run(n_users, n_subs, seconds)
   io.println("Simulation complete!")
