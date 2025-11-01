@@ -76,29 +76,3 @@ Performance:
   Actions/sec: 3750
 ================================
 ```
-
-## 6. Largest Input Configuration Simulated
-- Number of Users: 100
-- Number of Subreddits: 10
-- Execution Time: 10 seconds
-
-```
-=== Reddit Simulator Results ===
-Configuration:
-  Users: 100
-  Subreddits: 10
-  Duration: 10 seconds
-
-Activity:
-  Posts: 5500
-  Comments: 3600
-  Votes: 4500
-  Direct Messages: 3400
-  Subreddit Joins: 2500
-  Subreddit Leaves: 0
-
-Performance:
-  Total Actions: 19500
-  Actions/sec: 1950
-================================
-```
