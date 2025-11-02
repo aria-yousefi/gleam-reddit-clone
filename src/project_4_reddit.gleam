@@ -1,7 +1,3 @@
-//// Gleam Reddit Clone — Single-file version (project_4_reddit.gleam)
-
-// Requires: gleam_stdlib, gleam_otp
-
 import gleam/dict
 import gleam/erlang/process
 import gleam/float
@@ -13,10 +9,6 @@ import gleam/order
 import gleam/otp/actor
 import gleam/result
 import gleam/set
-
-// ============================
-// Types & shared definitions
-// ============================
 
 pub type UserId {
   UserId(Int)
@@ -129,9 +121,7 @@ pub type EngineReply {
   PostSample(sample: Option(Post))
 }
 
-// ============================
 // Engine (single process)
-// ============================
 
 pub type UserMsg {
   NotifyPost(post: Post)
@@ -203,12 +193,17 @@ fn bump(stat: String, st: EngineState) -> EngineState {
   EngineState(..st, stats: dict.insert(st.stats, stat, new_val))
 }
 
-@external(erlang, "project_4_reddit_helper", "system_time_millisecond")
-fn erlang_system_time_millisecond() -> Int
+@external(erlang, "erlang", "timestamp")
+fn erlang_timestamp() -> #(Int, Int, Int)
 
 fn now_ms() -> Int {
-  // erlang:system_time(millisecond) -> integer() >= 0
-  erlang_system_time_millisecond()
+  // erlang:timestamp() returns {MegaSecs, Secs, MicroSecs}
+  // Convert to milliseconds: MegaSecs*1000000000 + Secs*1000 + MicroSecs/1000
+  let #(mega, sec, micro) = erlang_timestamp()
+  let mega_ms = mega * 1_000_000_000
+  let sec_ms = sec * 1000
+  let micro_ms = micro / 1000
+  mega_ms + sec_ms + micro_ms
 }
 
 fn engine_handle(
@@ -279,7 +274,6 @@ fn engine_handle(
             EngineState(..st, posts: posts2, next_post_id: st.next_post_id + 1)
           let sub2: Subreddit =
             Subreddit(sub.name, sub.members, [id, ..sub.posts], sub.karma)
-          // Notify members (best-effort)
           let _ =
             set.to_list(sub.members)
             |> list.each(fn(u: UserId) {
@@ -313,7 +307,6 @@ fn engine_handle(
               next_comment_id: st.next_comment_id + 1,
             )
 
-          // Best-effort notify post author if registered
           let Post(_, post_author, _, _, _, _) = p
           let st2 = case dict_get_fallback(st1.users, post_author) {
             Ok(s) -> {
@@ -449,7 +442,7 @@ fn engine_handle(
         |> list.filter(fn(pair) { set.contains({ pair.1 }.members, user) })
       let all_post_ids = list.flat_map(user_subs, fn(pair) { { pair.1 }.posts })
 
-      // Get all posts from subscribed subreddits
+      // Get all posts from joined subreddits
       let posts_results =
         list.map(all_post_ids, fn(pid) { dict_get_fallback(st.posts, pid) })
       let posts = result.values(posts_results)
@@ -476,7 +469,6 @@ fn engine_handle(
       let all_items = list.append(post_items, comment_items)
 
       // Sort by timestamp (descending - most recent first)
-      // We need to extract ts_ms from each FeedItem
       let sorted_items =
         list.sort(all_items, fn(a: FeedItem, b: FeedItem) {
           let ts_a = case a {
@@ -487,7 +479,6 @@ fn engine_handle(
             FeedPost(p) -> p.ts_ms
             FeedComment(c, _) -> c.ts_ms
           }
-          // Descending order (newest first) - reverse the comparison
           case int.compare(ts_a, ts_b) {
             order.Lt -> order.Gt
             order.Eq -> order.Eq
@@ -550,8 +541,6 @@ fn engine_handle(
   }
 }
 
-// (Helper API used by clients)
-// Ask the engine to register, expect a reply
 pub fn register_user(engine: process.Subject(EngineMsg)) -> UserId {
   case process.call(engine, 5000, fn(reply) { Register(reply) }) {
     Registered(id) -> id
@@ -568,9 +557,7 @@ pub fn attach_user(
   Nil
 }
 
-// ============================
 // Zipf utilities
-// ============================
 
 pub fn pmf(n: Int, s: Float) -> List(Float) {
   let denom =
@@ -636,9 +623,7 @@ fn list_at(a: List(a), index: Int) -> Result(a, Nil) {
   list_at_go(a, index)
 }
 
-// ============================
 // User client (simulated)
-// ============================
 
 pub type ClientCfg {
   ClientCfg(
@@ -679,7 +664,6 @@ fn client_init_with_self(
   cfg: ClientCfg,
   self: process.Subject(ClientMsg),
 ) -> ClientState {
-  // for potential Engine→ClientMsg notifications
   let id = register_user(engine)
   attach_user(engine, id, self)
   ClientState(id, engine, False, [], 1_234_567, cfg, self, None, None, 0)
@@ -690,7 +674,6 @@ pub fn client_start(
   cfg: ClientCfg,
 ) -> process.Subject(ClientMsg) {
   let init_fn = fn(self: process.Subject(ClientMsg)) {
-    // Build initial state with a handle to our own subject
     let st = client_init_with_self(engine, cfg, self)
     Ok(actor.initialised(st) |> actor.returning(self))
   }
@@ -725,14 +708,12 @@ fn client_handle(
     Start -> {
       // Wait for connect_ms before going online
       schedule_delayed_message(st.cfg.connect_ms, st.self, GoOnline)
-      // Start the tick loop to handle timing checks
       process.send(st.self, Tick)
       actor.continue(st)
     }
 
     Tick -> {
       let tick_ms = 50
-      // Each tick represents ~50ms of activity
       let st2 = ClientState(..st, tick_count: st.tick_count + 1)
 
       // Act while online and check timing
@@ -741,7 +722,6 @@ fn client_handle(
           // Check if we've been online long enough
           case st2.online_since_tick {
             None -> {
-              // This shouldn't happen, but handle it
               let st3 =
                 ClientState(..st2, online_since_tick: Some(st2.tick_count))
               process.sleep(tick_ms)
@@ -814,7 +794,6 @@ fn client_handle(
     }
 
     GoOffline -> {
-      // Leave all subreddits when going offline
       list.each(st.subs, fn(sub: SubId) {
         process.send(st.engine, LeaveSub(st.id, sub))
       })
@@ -836,7 +815,6 @@ fn client_handle(
     }
 
     EngineReply(_reply) -> {
-      // Ignore engine replies for now
       actor.continue(st)
     }
   }
@@ -866,7 +844,6 @@ fn act_online(st: ClientState) -> ClientState {
             subs -> {
               let i = { st.rng % list.length(subs) } |> int.absolute_value
               let s = list_at(subs, i) |> result.unwrap("general")
-              // Generate post body (simplified - no synchronous repost to avoid blocking)
               let body = random_post_body(st.rng)
               process.send(st.engine, SubmitPost(st.id, s, body))
               st
@@ -922,9 +899,7 @@ fn random_post_body(r: Int) -> String {
   "post-" <> int.to_string(int.absolute_value(r) % 65_535)
 }
 
-// ============================
 // Simulator + Main
-// ============================
 
 pub fn sim_run(n_users: Int, n_subs: Int, seconds: Int) -> Nil {
   let eng = engine_start()
@@ -1027,7 +1002,7 @@ fn print_stats(
 
 pub fn main() {
   io.println("Starting Reddit Simulator...")
-  let n_users = 300
+  let n_users = 150
   let n_subs = 10
   let seconds = 30
 
