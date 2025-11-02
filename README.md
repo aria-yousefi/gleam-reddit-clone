@@ -33,13 +33,13 @@ The simulator can be configured by modifying the `main()` function in `src/proje
 
 - **Number of Users**: Currently set to 150
 - **Number of Subreddits**: Currently set to 10
-- **Time Run**: Currently set to 5 seconds
+- **Time Run**: Currently set to 30 seconds
 
 Example configuration:
 ```gleam
 let n_users = 150
 let n_subs = 10
-let seconds = 5
+let seconds = 30
 ```
 
 ## 5. Metrics Recorded
