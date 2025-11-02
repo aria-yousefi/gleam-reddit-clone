@@ -9,6 +9,7 @@ import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/otp/actor
 import gleam/result
 import gleam/set
@@ -149,6 +150,7 @@ pub type EngineState {
     next_comment_id: Int,
     next_dm_id: Int,
     stats: dict.Dict(String, Int),
+    votes: set.Set(String),
   )
 }
 
@@ -180,6 +182,7 @@ fn engine_init(_msg: Nil) -> EngineState {
       #("joins", 0),
       #("leaves", 0),
     ]),
+    votes: set.new(),
   )
 }
 
@@ -200,9 +203,12 @@ fn bump(stat: String, st: EngineState) -> EngineState {
   EngineState(..st, stats: dict.insert(st.stats, stat, new_val))
 }
 
+@external(erlang, "project_4_reddit_helper", "system_time_millisecond")
+fn erlang_system_time_millisecond() -> Int
+
 fn now_ms() -> Int {
-  process.sleep(0)
-  0
+  // erlang:system_time(millisecond) -> integer() >= 0
+  erlang_system_time_millisecond()
 }
 
 fn engine_handle(
@@ -322,63 +328,177 @@ fn engine_handle(
       }
     }
 
-    UpvotePost(_user, pid) -> {
-      case dict_get_fallback(st.posts, pid) {
-        Error(_) -> actor.continue(st)
-        Ok(p) -> {
-          let p2 = Post(..p, karma: Karma(p.karma.ups + 1, p.karma.downs))
-          let posts2: dict.Dict(PostId, Post) = dict.insert(st.posts, pid, p2)
-          actor.continue(bump("votes", EngineState(..st, posts: posts2)))
+    UpvotePost(user, pid) -> {
+      let UserId(user_id) = user
+      let PostId(post_id) = pid
+      let vote_key =
+        "p:" <> int.to_string(user_id) <> ":" <> int.to_string(post_id)
+      case set.contains(st.votes, vote_key) {
+        True -> {
+          // User already voted on this post
+          actor.continue(st)
+        }
+        False -> {
+          case dict_get_fallback(st.posts, pid) {
+            Error(_) -> actor.continue(st)
+            Ok(p) -> {
+              let p2 = Post(..p, karma: Karma(p.karma.ups + 1, p.karma.downs))
+              let posts2: dict.Dict(PostId, Post) =
+                dict.insert(st.posts, pid, p2)
+              let votes2: set.Set(String) = set.insert(st.votes, vote_key)
+              actor.continue(bump(
+                "votes",
+                EngineState(..st, posts: posts2, votes: votes2),
+              ))
+            }
+          }
         }
       }
     }
 
-    DownvotePost(_user, pid) -> {
-      case dict_get_fallback(st.posts, pid) {
-        Error(_) -> actor.continue(st)
-        Ok(p) -> {
-          let p2 = Post(..p, karma: Karma(p.karma.ups, p.karma.downs + 1))
-          let posts2: dict.Dict(PostId, Post) = dict.insert(st.posts, pid, p2)
-          actor.continue(bump("votes", EngineState(..st, posts: posts2)))
+    DownvotePost(user, pid) -> {
+      let UserId(user_id) = user
+      let PostId(post_id) = pid
+      let vote_key =
+        "p:" <> int.to_string(user_id) <> ":" <> int.to_string(post_id)
+      case set.contains(st.votes, vote_key) {
+        True -> {
+          // User already voted on this post
+          actor.continue(st)
+        }
+        False -> {
+          case dict_get_fallback(st.posts, pid) {
+            Error(_) -> actor.continue(st)
+            Ok(p) -> {
+              let p2 = Post(..p, karma: Karma(p.karma.ups, p.karma.downs + 1))
+              let posts2: dict.Dict(PostId, Post) =
+                dict.insert(st.posts, pid, p2)
+              let votes2: set.Set(String) = set.insert(st.votes, vote_key)
+              actor.continue(bump(
+                "votes",
+                EngineState(..st, posts: posts2, votes: votes2),
+              ))
+            }
+          }
         }
       }
     }
 
-    UpvoteComment(_u, cid) -> {
-      case dict_get_fallback(st.comments, cid) {
-        Error(_) -> actor.continue(st)
-        Ok(c) -> {
-          let c2 = Comment(..c, karma: Karma(c.karma.ups + 1, c.karma.downs))
-          let comments2: dict.Dict(CommentId, Comment) =
-            dict.insert(st.comments, cid, c2)
-          actor.continue(bump("votes", EngineState(..st, comments: comments2)))
+    UpvoteComment(user, cid) -> {
+      let UserId(user_id) = user
+      let CommentId(comment_id) = cid
+      let vote_key =
+        "c:" <> int.to_string(user_id) <> ":" <> int.to_string(comment_id)
+      case set.contains(st.votes, vote_key) {
+        True -> {
+          // User already voted on this comment
+          actor.continue(st)
+        }
+        False -> {
+          case dict_get_fallback(st.comments, cid) {
+            Error(_) -> actor.continue(st)
+            Ok(c) -> {
+              let c2 =
+                Comment(..c, karma: Karma(c.karma.ups + 1, c.karma.downs))
+              let comments2: dict.Dict(CommentId, Comment) =
+                dict.insert(st.comments, cid, c2)
+              let votes2: set.Set(String) = set.insert(st.votes, vote_key)
+              actor.continue(bump(
+                "votes",
+                EngineState(..st, comments: comments2, votes: votes2),
+              ))
+            }
+          }
         }
       }
     }
 
-    DownvoteComment(_u, cid) -> {
-      case dict_get_fallback(st.comments, cid) {
-        Error(_) -> actor.continue(st)
-        Ok(c) -> {
-          let c2 = Comment(..c, karma: Karma(c.karma.ups, c.karma.downs + 1))
-          let comments2: dict.Dict(CommentId, Comment) =
-            dict.insert(st.comments, cid, c2)
-          actor.continue(bump("votes", EngineState(..st, comments: comments2)))
+    DownvoteComment(user, cid) -> {
+      let UserId(user_id) = user
+      let CommentId(comment_id) = cid
+      let vote_key =
+        "c:" <> int.to_string(user_id) <> ":" <> int.to_string(comment_id)
+      case set.contains(st.votes, vote_key) {
+        True -> {
+          // User already voted on this comment
+          actor.continue(st)
+        }
+        False -> {
+          case dict_get_fallback(st.comments, cid) {
+            Error(_) -> actor.continue(st)
+            Ok(c) -> {
+              let c2 =
+                Comment(..c, karma: Karma(c.karma.ups, c.karma.downs + 1))
+              let comments2: dict.Dict(CommentId, Comment) =
+                dict.insert(st.comments, cid, c2)
+              let votes2: set.Set(String) = set.insert(st.votes, vote_key)
+              actor.continue(bump(
+                "votes",
+                EngineState(..st, comments: comments2, votes: votes2),
+              ))
+            }
+          }
         }
       }
     }
 
     GetFeed(user, limit, reply) -> {
+      // Get all posts from user's subscribed subreddits
       let user_subs =
         dict.to_list(st.subs)
         |> list.filter(fn(pair) { set.contains({ pair.1 }.members, user) })
       let all_post_ids = list.flat_map(user_subs, fn(pair) { { pair.1 }.posts })
-      let limited_ids = list.take(all_post_ids, limit)
+
+      // Get all posts from subscribed subreddits
       let posts_results =
-        list.map(limited_ids, fn(pid) { dict_get_fallback(st.posts, pid) })
-      let posts_only = result.values(posts_results)
-      let feed_items = list.map(posts_only, FeedPost)
-      process.send(reply, Feed(feed_items))
+        list.map(all_post_ids, fn(pid) { dict_get_fallback(st.posts, pid) })
+      let posts = result.values(posts_results)
+
+      // Get all comments on those posts
+      let all_comments: List(Comment) =
+        dict.to_list(st.comments) |> list.map(fn(pair) { pair.1 })
+
+      let comments_on_user_posts =
+        list.filter(all_comments, fn(c: Comment) {
+          list.contains(all_post_ids, c.post)
+        })
+
+      // Create feed items from posts
+      let post_items = list.map(posts, FeedPost)
+
+      // Create feed items from comments (include the post ID)
+      let comment_items =
+        list.map(comments_on_user_posts, fn(c: Comment) {
+          FeedComment(c, c.post)
+        })
+
+      // Combine and sort by timestamp (most recent first)
+      let all_items = list.append(post_items, comment_items)
+
+      // Sort by timestamp (descending - most recent first)
+      // We need to extract ts_ms from each FeedItem
+      let sorted_items =
+        list.sort(all_items, fn(a: FeedItem, b: FeedItem) {
+          let ts_a = case a {
+            FeedPost(p) -> p.ts_ms
+            FeedComment(c, _) -> c.ts_ms
+          }
+          let ts_b = case b {
+            FeedPost(p) -> p.ts_ms
+            FeedComment(c, _) -> c.ts_ms
+          }
+          // Descending order (newest first) - reverse the comparison
+          case int.compare(ts_a, ts_b) {
+            order.Lt -> order.Gt
+            order.Eq -> order.Eq
+            order.Gt -> order.Lt
+          }
+        })
+
+      // Apply limit
+      let limited_items = list.take(sorted_items, limit)
+
+      process.send(reply, Feed(limited_items))
       actor.continue(st)
     }
 
@@ -539,6 +659,9 @@ pub type ClientState {
     rng: Int,
     cfg: ClientCfg,
     self: process.Subject(ClientMsg),
+    online_since_tick: Option(Int),
+    offline_since_tick: Option(Int),
+    tick_count: Int,
   )
 }
 
@@ -559,7 +682,7 @@ fn client_init_with_self(
   // for potential Engine→ClientMsg notifications
   let id = register_user(engine)
   attach_user(engine, id, self)
-  ClientState(id, engine, False, [], 1_234_567, cfg, self)
+  ClientState(id, engine, False, [], 1_234_567, cfg, self, None, None, 0)
 }
 
 pub fn client_start(
@@ -580,44 +703,131 @@ pub fn client_start(
   subject.data
 }
 
+fn schedule_delayed_message(
+  delay_ms: Int,
+  subject: process.Subject(ClientMsg),
+  message: ClientMsg,
+) -> Nil {
+  let timer_fn = fn() {
+    process.sleep(delay_ms)
+    process.send(subject, message)
+    Nil
+  }
+  let _ = process.spawn(timer_fn)
+  Nil
+}
+
 fn client_handle(
   st: ClientState,
   msg: ClientMsg,
 ) -> actor.Next(ClientState, ClientMsg) {
   case msg {
     Start -> {
-      // Start by going online
-      process.send(st.self, GoOnline)
+      // Wait for connect_ms before going online
+      schedule_delayed_message(st.cfg.connect_ms, st.self, GoOnline)
+      // Start the tick loop to handle timing checks
+      process.send(st.self, Tick)
       actor.continue(st)
     }
 
     Tick -> {
-      // Act while online
-      let st2 = case st.connected {
-        True -> {
-          // Add delay to avoid overwhelming the engine
-          process.sleep(50)
-          act_online(st)
-        }
-        False -> st
-      }
+      let tick_ms = 50
+      // Each tick represents ~50ms of activity
+      let st2 = ClientState(..st, tick_count: st.tick_count + 1)
 
-      // Continue ticking to keep acting
-      process.send(st2.self, Tick)
-      actor.continue(st2)
+      // Act while online and check timing
+      case st2.connected {
+        True -> {
+          // Check if we've been online long enough
+          case st2.online_since_tick {
+            None -> {
+              // This shouldn't happen, but handle it
+              let st3 =
+                ClientState(..st2, online_since_tick: Some(st2.tick_count))
+              process.sleep(tick_ms)
+              let st4 = act_online(st3)
+              process.send(st4.self, Tick)
+              actor.continue(st4)
+            }
+            Some(online_start_tick) -> {
+              let elapsed_ticks = st2.tick_count - online_start_tick
+              let elapsed_ms = elapsed_ticks * tick_ms
+              case elapsed_ms >= st2.cfg.online_ms {
+                True -> {
+                  // Time to go offline
+                  process.send(st2.self, GoOffline)
+                  actor.continue(st2)
+                }
+                False -> {
+                  // Continue acting online
+                  process.sleep(tick_ms)
+                  let st3 = act_online(st2)
+                  process.send(st3.self, Tick)
+                  actor.continue(st3)
+                }
+              }
+            }
+          }
+        }
+        False -> {
+          // Offline - check if we've been offline long enough
+          case st2.offline_since_tick {
+            None -> {
+              // Just went offline or initial state, continue waiting
+              process.sleep(tick_ms)
+              process.send(st2.self, Tick)
+              actor.continue(st2)
+            }
+            Some(offline_start_tick) -> {
+              let elapsed_ticks = st2.tick_count - offline_start_tick
+              let elapsed_ms = elapsed_ticks * tick_ms
+              case elapsed_ms >= st2.cfg.offline_ms {
+                True -> {
+                  // Time to go back online
+                  process.send(st2.self, GoOnline)
+                  actor.continue(st2)
+                }
+                False -> {
+                  // Continue waiting offline
+                  process.sleep(tick_ms)
+                  process.send(st2.self, Tick)
+                  actor.continue(st2)
+                }
+              }
+            }
+          }
+        }
+      }
     }
 
     GoOnline -> {
-      let st2 = ClientState(..st, connected: True)
+      let st2 =
+        ClientState(
+          ..st,
+          connected: True,
+          online_since_tick: Some(st.tick_count),
+          offline_since_tick: None,
+        )
       // Start acting
       process.send(st2.self, Tick)
       actor.continue(st2)
     }
 
     GoOffline -> {
-      let st2 = ClientState(..st, connected: False)
-      // Go back online after a brief moment
-      process.send(st2.self, GoOnline)
+      // Leave all subreddits when going offline
+      list.each(st.subs, fn(sub: SubId) {
+        process.send(st.engine, LeaveSub(st.id, sub))
+      })
+      let st2 =
+        ClientState(
+          ..st,
+          connected: False,
+          online_since_tick: None,
+          offline_since_tick: Some(st.tick_count),
+          subs: [],
+        )
+      // Wait for offline_ms before going back online (handled in Tick)
+      process.send(st2.self, Tick)
       actor.continue(st2)
     }
 
@@ -817,9 +1027,9 @@ fn print_stats(
 
 pub fn main() {
   io.println("Starting Reddit Simulator...")
-  let n_users = 100
+  let n_users = 150
   let n_subs = 10
-  let seconds = 10
+  let seconds = 30
 
   sim_run(n_users, n_subs, seconds)
   io.println("Simulation complete!")
