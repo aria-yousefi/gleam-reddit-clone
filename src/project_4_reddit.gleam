@@ -1,3 +1,4 @@
+import argv
 import gleam/dict
 import gleam/erlang/process
 import gleam/float
@@ -1001,11 +1002,21 @@ fn print_stats(
 }
 
 pub fn main() {
-  io.println("Starting Reddit Simulator...")
-  let n_users = 150
-  let n_subs = 10
-  let seconds = 30
+  let args = argv.load()
+  let arguments = args.arguments
+  case arguments {
+    ["server", ..] -> {
+      io.println("To start the API server, run: gleam run -m api")
+      io.println("Or use: gleam run -m api server [port]")
+    }
+    _ -> {
+      io.println("Starting Reddit Simulator...")
+      let n_users = 150
+      let n_subs = 10
+      let seconds = 30
 
-  sim_run(n_users, n_subs, seconds)
-  io.println("Simulation complete!")
+      sim_run(n_users, n_subs, seconds)
+      io.println("Simulation complete!")
+    }
+  }
 }
