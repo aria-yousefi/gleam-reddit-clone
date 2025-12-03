@@ -1,6 +1,6 @@
 # Reddit API Client Scripts
 
-This directory contains shell scripts for testing the Reddit REST API.
+This directory contains shell scripts for testing the Reddit REST API. Each shell script accepts a required set of input parameters, and runs a curl command to access the Reddit Clone API.
 
 ## Prerequisites
 
@@ -12,15 +12,11 @@ This directory contains shell scripts for testing the Reddit REST API.
 To start the API server, run:
 
 ```bash
-gleam run server [port]
+gleam run -m api
 ```
 
 If no port is specified, it defaults to 8080.
 
-Example:
-```bash
-gleam run server 8080
-```
 
 ## Available Scripts
 
